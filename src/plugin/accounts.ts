@@ -2,7 +2,7 @@ import { loadAccounts, saveAccounts, type AccountStorageV4, type AccountMetadata
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
-import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
+import { coerceFingerprint, generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
 import { debugLogToFile } from "./debug";
 
 /** Quota group identifier for soft quota checks (local definition — Kimi has no external quota module). */
@@ -364,8 +364,8 @@ export class AccountManager {
             coolingDownUntil: acc.coolingDownUntil,
             cooldownReason: acc.cooldownReason,
             touchedForQuota: {},
-            fingerprint: acc.fingerprint ?? generateFingerprint(),
-            fingerprintHistory: acc.fingerprintHistory ?? [],
+	            fingerprint: coerceFingerprint(acc.fingerprint),
+	            fingerprintHistory: acc.fingerprintHistory ?? [],
             cachedQuota: acc.cachedQuota as Partial<Record<QuotaGroup, QuotaGroupSummary>> | undefined,
             cachedQuotaUpdatedAt: acc.cachedQuotaUpdatedAt,
             verificationRequired: acc.verificationRequired,
