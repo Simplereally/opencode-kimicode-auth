@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { exec } from "node:child_process";
 
 import {
   KIMI_API_BASE_URL,
   getKimiDeviceHeaders,
   getKimiUserAgent,
+  setOAuthDeviceId,
 } from "./constants";
 import { authorizeKimi } from "./kimi/oauth";
 import { accessTokenExpired, calculateTokenExpiry, isOAuthAuth } from "./plugin/auth";
@@ -26,6 +28,7 @@ import { KimiTokenRefreshError, refreshAccessToken } from "./plugin/token";
 import { AccountManager, parseRateLimitReason, type ManagedAccount } from "./plugin/accounts";
 import { clearAccounts, loadAccounts, saveAccounts, saveAccountsReplace, type AccountMetadataV3 } from "./plugin/storage";
 import { loadConfig, initRuntimeConfig, type KimicodeConfig } from "./plugin/config";
+import { updateOpencodeConfig } from "./plugin/config/updater";
 import { initKimicodeVersion } from "./plugin/version";
 import type {
   AuthDetails,
@@ -57,12 +60,18 @@ const MAX_TOAST_COOLDOWN_ENTRIES = 100;
 
 const DUMMY_URL_BASE = "http://opencode.local";
 
+// Stable per-plugin-instance session ID for Kimi server-side prompt caching.
+// Mirrors kimi-cli's session.id passed as prompt_cache_key.
+const PLUGIN_SESSION_ID = randomUUID();
+
 const KIMICODE_MODEL_PREFIX = "kimicode-";
 
 function resolveKimiModelAlias(requestedModel: string): string {
-  // Allow a more descriptive OpenCode model id while mapping to the
-  // single Kimi Code model currently exposed by the API.
-  if (requestedModel === "kimicode-kimi-k2.5") {
+  // Both the base and thinking models map to the same Kimi API model.
+  if (
+    requestedModel === "kimicode-kimi-k2.5" ||
+    requestedModel === "kimicode-kimi-k2.5-thinking"
+  ) {
     return "kimi-for-coding";
   }
 
@@ -71,6 +80,14 @@ function resolveKimiModelAlias(requestedModel: string): string {
   }
 
   return requestedModel;
+}
+
+/**
+ * Whether the requested OpenCode model id asks for extended thinking.
+ * Mirrors kimi-cli's `with_thinking("high")` vs `with_thinking("off")`.
+ */
+function isThinkingModel(requestedModel: string): boolean {
+  return requestedModel === "kimicode-kimi-k2.5-thinking";
 }
 
 function extractKimiUserIdFromJwt(token: string): string | undefined {
@@ -454,12 +471,11 @@ async function persistAccountPool(
         : 0;
 
   const payload = {
-    version: 4 as const,
+    version: 1 as const,
     accounts,
     activeIndex: Math.max(0, Math.min(activeIndex, accounts.length - 1)),
     activeIndexByFamily: {
-      claude: Math.max(0, Math.min(activeIndex, accounts.length - 1)),
-      gemini: Math.max(0, Math.min(activeIndex, accounts.length - 1)),
+      kimi: Math.max(0, Math.min(activeIndex, accounts.length - 1)),
     },
   };
 
@@ -493,12 +509,11 @@ async function removeAccountFromPool(removeIndex: number): Promise<boolean> {
   nextActiveIndex = Math.max(0, Math.min(nextActiveIndex, nextAccounts.length - 1));
 
   const payload = {
-    version: 4 as const,
+    version: 1 as const,
     accounts: nextAccounts,
     activeIndex: nextActiveIndex,
     activeIndexByFamily: {
-      claude: nextActiveIndex,
-      gemini: nextActiveIndex,
+      kimi: nextActiveIndex,
     },
   };
 
@@ -518,6 +533,9 @@ export const createKimicodePlugin = (providerId: string) => async (
 
   // Resolve plugin version for X-Msh-Version headers (best-effort).
   await initKimicodeVersion();
+
+  // Sync model definitions to opencode.json on every load (best-effort).
+  await updateOpencodeConfig().catch(() => {});
 
   // Initialize trackers (hybrid strategy).
   if (config.health_score) {
@@ -609,11 +627,23 @@ export const createKimicodePlugin = (providerId: string) => async (
 
 	        const accountManager = await AccountManager.loadFromDisk(auth);
 
+	        // Seed the OAuth device ID from the first account's fingerprint so that
+	        // OAuth requests (refresh, etc.) use a consistent device identity,
+	        // mirroring kimi-cli's persistent ~/.kimi/device_id.
+	        try {
+	          const firstAccount = accountManager.getAccounts()[0];
+	          if (firstAccount?.fingerprint?.deviceId) {
+	            setOAuthDeviceId(firstAccount.fingerprint.deviceId);
+	          }
+	        } catch {
+	          // best-effort
+	        }
+
 	        // Self-heal: older versions could disable valid accounts due to 403 gating.
 	        // Re-enable accounts disabled for "auth-failure" so they can be retried/refreshed.
 	        try {
 	          for (const acc of accountManager.getAccounts()) {
-	            if (acc.enabled === false && acc.cooldownReason === "auth-failure" && acc.verificationRequired !== true) {
+	            if (acc.enabled === false && acc.cooldownReason === "auth-failure") {
 	              accountManager.setAccountEnabled(acc.index, true);
 	              accountManager.clearAccountCooldown(acc);
 	            }
@@ -717,17 +747,34 @@ export const createKimicodePlugin = (providerId: string) => async (
 	                    if (!isKimicodeModel) {
 	                      throw new Error(
 	                        `Moonshot AI OAuth (Kimi Code) only supports models with the '${KIMICODE_MODEL_PREFIX}' prefix. ` +
-	                        `Use moonshotai/kimicode-kimi-k2.5, or re-run 'opencode auth login' and choose API Key to use moonshotai/${requestedModel}.`,
+	                        `Use moonshotai/kimicode-kimi-k2.5 or moonshotai/kimicode-kimi-k2.5-thinking, ` +
+	                        `or re-run 'opencode auth login' and choose API Key to use moonshotai/${requestedModel}.`,
 	                      );
 	                    }
 
                     const effectiveModel = resolveKimiModelAlias(requestedModel);
-                    if (effectiveModel !== requestedModel) {
-                      parsed.model = effectiveModel;
-                      bodyForAttempts = Buffer.from(JSON.stringify(parsed), "utf8");
-                      // Body length may have changed; let fetch() compute it.
-                      baseHeaders.delete("content-length");
+                    const wantsThinking = isThinkingModel(requestedModel);
+
+                    // Always rewrite: model alias + thinking parameters.
+                    parsed.model = effectiveModel;
+
+                    // Inject thinking parameters matching kimi-cli wire format.
+                    // Thinking ON:  reasoning_effort="high", thinking={type:"enabled"}
+                    // Thinking OFF: remove reasoning_effort,  thinking={type:"disabled"}
+                    if (wantsThinking) {
+                      parsed.reasoning_effort = "high";
+                      parsed.thinking = { type: "enabled" };
+                    } else {
+                      delete parsed.reasoning_effort;
+                      parsed.thinking = { type: "disabled" };
                     }
+
+                    // Enable Kimi server-side prompt caching (mirrors kimi-cli).
+                    parsed.prompt_cache_key = PLUGIN_SESSION_ID;
+
+                    bodyForAttempts = Buffer.from(JSON.stringify(parsed), "utf8");
+                    // Body length may have changed; let fetch() compute it.
+                    baseHeaders.delete("content-length");
                   }
                 } catch (e) {
                   // If we can't parse JSON, fall back to sending the buffered body unmodified.
@@ -743,9 +790,8 @@ export const createKimicodePlugin = (providerId: string) => async (
               ? (config.max_rate_limit_wait_seconds * 1000)
               : 0;
 
-            // Treat Kimi as a single-family provider (reuse existing storage/rotation primitives).
-            const FAMILY = "gemini" as const;
-            const HEADER_STYLE = "antigravity" as const;
+            const FAMILY = "kimi" as const;
+            const HEADER_STYLE = "kimi-cli" as const;
 
             let capacityRetryCount = 0;
             let attemptedRefreshForAccount = false;

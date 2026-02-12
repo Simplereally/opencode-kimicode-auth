@@ -8,6 +8,7 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
 
     expect(modelNames).toEqual([
       "kimicode-kimi-k2.5",
+      "kimicode-kimi-k2.5-thinking",
     ])
   })
 

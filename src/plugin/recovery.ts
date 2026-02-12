@@ -2,11 +2,13 @@
  * Session recovery hook for handling recoverable errors.
  * 
  * Supports:
- * - tool_result_missing: When ESC is pressed during tool execution
- * - thinking_block_order: When thinking blocks are corrupted/stripped
- * - thinking_disabled_violation: Thinking in non-thinking model
+ * - tool_result_missing: When ESC is pressed during tool execution (provider-agnostic)
+ * - thinking_block_order: When thinking blocks are corrupted/stripped (Claude-specific; no-op for Kimi)
+ * - thinking_disabled_violation: Thinking in non-thinking model (Claude-specific; no-op for Kimi)
  * 
- * Based on oh-my-opencode/src/hooks/session-recovery/index.ts
+ * Note: Kimi uses OpenAI-compatible error formats. The thinking_* error patterns
+ * will never match Kimi errors since they are Anthropic/Claude-specific concepts.
+ * The detection functions are retained for completeness and will simply return null.
  */
 
 import type { KimicodeConfig } from "./config";

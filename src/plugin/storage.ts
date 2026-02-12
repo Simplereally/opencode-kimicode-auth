@@ -125,113 +125,55 @@ export function ensureGitignoreSync(configDir: string): void {
   }
 }
 
-export type ModelFamily = "claude" | "gemini";
+export type ModelFamily = "kimi";
 
 /**
- * Header style for quota tracking.
- * Retained for storage compatibility with existing account data.
+ * Header style for API requests.
+ * Kimi uses a single header style matching kimi-cli.
  */
-export type HeaderStyle = "antigravity" | "gemini-cli";
+export type HeaderStyle = "kimi-cli";
 
 export interface RateLimitState {
-  claude?: number;
-  gemini?: number;
-}
-
-export interface RateLimitStateV3 {
-  claude?: number;
-  "gemini-antigravity"?: number;
-  "gemini-cli"?: number;
+  kimi?: number;
   [key: string]: number | undefined;
-}
-
-export interface AccountMetadataV1 {
-  email?: string;
-  refreshToken: string;
-  projectId?: string;
-  managedProjectId?: string;
-  addedAt: number;
-  lastUsed: number;
-  isRateLimited?: boolean;
-  rateLimitResetTime?: number;
-  lastSwitchReason?: "rate-limit" | "initial" | "rotation";
-}
-
-export interface AccountStorageV1 {
-  version: 1;
-  accounts: AccountMetadataV1[];
-  activeIndex: number;
-}
-
-export interface AccountMetadata {
-  email?: string;
-  refreshToken: string;
-  projectId?: string;
-  managedProjectId?: string;
-  addedAt: number;
-  lastUsed: number;
-  lastSwitchReason?: "rate-limit" | "initial" | "rotation";
-  rateLimitResetTimes?: RateLimitState;
-}
-
-export interface AccountStorage {
-  version: 2;
-  accounts: AccountMetadata[];
-  activeIndex: number;
 }
 
 export type CooldownReason = "auth-failure" | "network-error" | "project-error" | "validation-required";
 
-export interface AccountMetadataV3 {
+export interface AccountMetadata {
   email?: string;
   refreshToken: string;
-  projectId?: string;
-  managedProjectId?: string;
   addedAt: number;
   lastUsed: number;
   enabled?: boolean;
   lastSwitchReason?: "rate-limit" | "initial" | "rotation";
-  rateLimitResetTimes?: RateLimitStateV3;
+  rateLimitResetTimes?: RateLimitState;
   coolingDownUntil?: number;
   cooldownReason?: CooldownReason;
   /** Per-account device fingerprint for rate limit mitigation */
   fingerprint?: import("./fingerprint").Fingerprint;
   fingerprintHistory?: import("./fingerprint").FingerprintVersion[];
-  /** Set when Google asks the user to verify this account before requests can continue. */
-  verificationRequired?: boolean;
-  verificationRequiredAt?: number;
-  verificationRequiredReason?: string;
-  verificationUrl?: string;
   /** Cached soft quota data */
   cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
   cachedQuotaUpdatedAt?: number;
 }
 
-export interface AccountStorageV3 {
-  version: 3;
-  accounts: AccountMetadataV3[];
+export interface AccountStorage {
+  version: 1;
+  accounts: AccountMetadata[];
   activeIndex: number;
   activeIndexByFamily?: {
-    claude?: number;
-    gemini?: number;
+    kimi?: number;
   };
 }
 
-export interface AccountStorageV4 {
-  version: 4;
-  accounts: AccountMetadataV3[];
-  activeIndex: number;
-  activeIndexByFamily?: {
-    claude?: number;
-    gemini?: number;
-  };
-}
-
-type AnyAccountStorage =
-  | AccountStorageV1
-  | AccountStorage
-  | AccountStorageV3
-  | AccountStorageV4;
+/**
+ * @deprecated Aliases retained so existing imports compile during migration.
+ * New code should use AccountMetadata / AccountStorage / RateLimitState directly.
+ */
+export type AccountMetadataV3 = AccountMetadata;
+export type AccountStorageV4 = AccountStorage;
+export type RateLimitStateV3 = RateLimitState;
 
 /**
  * Gets the legacy Windows config directory (%APPDATA%\opencode).
@@ -379,7 +321,7 @@ async function ensureFileExists(path: string): Promise<void> {
     await fs.mkdir(dirname(path), { recursive: true });
     await fs.writeFile(
       path,
-      JSON.stringify({ version: 4, accounts: [], activeIndex: 0 }, null, 2),
+      JSON.stringify({ version: 1, accounts: [], activeIndex: 0 }, null, 2),
       { encoding: "utf-8", mode: 0o600 },
     );
   }
@@ -403,10 +345,10 @@ async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
 }
 
 function mergeAccountStorage(
-  existing: AccountStorageV4,
-  incoming: AccountStorageV4,
-): AccountStorageV4 {
-  const accountMap = new Map<string, AccountMetadataV3>();
+  existing: AccountStorage,
+  incoming: AccountStorage,
+): AccountStorage {
+  const accountMap = new Map<string, AccountMetadata>();
 
   for (const acc of existing.accounts) {
     if (acc.refreshToken) {
@@ -421,9 +363,6 @@ function mergeAccountStorage(
         accountMap.set(acc.refreshToken, {
           ...existingAcc,
           ...acc,
-          // Preserve manually configured projectId/managedProjectId if not in incoming
-          projectId: acc.projectId ?? existingAcc.projectId,
-          managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
           rateLimitResetTimes: {
             ...existingAcc.rateLimitResetTimes,
             ...acc.rateLimitResetTimes,
@@ -437,7 +376,7 @@ function mergeAccountStorage(
   }
 
   return {
-    version: 4,
+    version: 1,
     accounts: Array.from(accountMap.values()),
     activeIndex: incoming.activeIndex,
     activeIndexByFamily: incoming.activeIndexByFamily,
@@ -450,13 +389,11 @@ export function deduplicateAccountsByEmail<
   const emailToNewestIndex = new Map<string, number>();
   const indicesToKeep = new Set<number>();
 
-  // First pass: find the newest account for each email (by lastUsed, then addedAt)
   for (let i = 0; i < accounts.length; i++) {
     const acc = accounts[i];
     if (!acc) continue;
 
     if (!acc.email) {
-      // No email - keep this account (can't deduplicate without email)
       indicesToKeep.add(i);
       continue;
     }
@@ -467,15 +404,12 @@ export function deduplicateAccountsByEmail<
       continue;
     }
 
-    // Compare to find which is newer
     const existing = accounts[existingIndex];
     if (!existing) {
       emailToNewestIndex.set(acc.email, i);
       continue;
     }
 
-    // Prefer higher lastUsed, then higher addedAt
-    // Compare fields separately to avoid integer overflow with large timestamps
     const currLastUsed = acc.lastUsed || 0;
     const existLastUsed = existing.lastUsed || 0;
     const currAddedAt = acc.addedAt || 0;
@@ -490,12 +424,10 @@ export function deduplicateAccountsByEmail<
     }
   }
 
-  // Add all the newest email-based indices to the keep set
   for (const idx of emailToNewestIndex.values()) {
     indicesToKeep.add(idx);
   }
 
-  // Build the deduplicated list, preserving original order for kept items
   const result: T[] = [];
   for (let i = 0; i < accounts.length; i++) {
     if (indicesToKeep.has(i)) {
@@ -509,166 +441,42 @@ export function deduplicateAccountsByEmail<
   return result;
 }
 
-function migrateV1ToV2(v1: AccountStorageV1): AccountStorage {
-  return {
-    version: 2,
-    accounts: v1.accounts.map((acc) => {
-      const rateLimitResetTimes: RateLimitState = {};
-      if (
-        acc.isRateLimited &&
-        acc.rateLimitResetTime &&
-        acc.rateLimitResetTime > Date.now()
-      ) {
-        rateLimitResetTimes.claude = acc.rateLimitResetTime;
-        rateLimitResetTimes.gemini = acc.rateLimitResetTime;
-      }
-      return {
-        email: acc.email,
-        refreshToken: acc.refreshToken,
-        projectId: acc.projectId,
-        managedProjectId: acc.managedProjectId,
-        addedAt: acc.addedAt,
-        lastUsed: acc.lastUsed,
-        lastSwitchReason: acc.lastSwitchReason,
-        rateLimitResetTimes:
-          Object.keys(rateLimitResetTimes).length > 0
-            ? rateLimitResetTimes
-            : undefined,
-      };
-    }),
-    activeIndex: v1.activeIndex,
-  };
-}
-
-export function migrateV2ToV3(v2: AccountStorage): AccountStorageV3 {
-  return {
-    version: 3,
-    accounts: v2.accounts.map((acc) => {
-      const rateLimitResetTimes: RateLimitStateV3 = {};
-      if (
-        acc.rateLimitResetTimes?.claude &&
-        acc.rateLimitResetTimes.claude > Date.now()
-      ) {
-        rateLimitResetTimes.claude = acc.rateLimitResetTimes.claude;
-      }
-      if (
-        acc.rateLimitResetTimes?.gemini &&
-        acc.rateLimitResetTimes.gemini > Date.now()
-      ) {
-        rateLimitResetTimes["gemini-antigravity"] =
-          acc.rateLimitResetTimes.gemini;
-      }
-      return {
-        email: acc.email,
-        refreshToken: acc.refreshToken,
-        projectId: acc.projectId,
-        managedProjectId: acc.managedProjectId,
-        addedAt: acc.addedAt,
-        lastUsed: acc.lastUsed,
-        lastSwitchReason: acc.lastSwitchReason,
-        rateLimitResetTimes:
-          Object.keys(rateLimitResetTimes).length > 0
-            ? rateLimitResetTimes
-            : undefined,
-      };
-    }),
-    activeIndex: v2.activeIndex,
-  };
-}
-
-export function migrateV3ToV4(v3: AccountStorageV3): AccountStorageV4 {
-  return {
-    version: 4,
-    accounts: v3.accounts.map((acc) => ({
-      ...acc,
-      fingerprint: undefined,
-      fingerprintHistory: undefined,
-    })),
-    activeIndex: v3.activeIndex,
-    activeIndexByFamily: v3.activeIndexByFamily,
-  };
-}
-
-export async function loadAccounts(): Promise<AccountStorageV4 | null> {
+export async function loadAccounts(): Promise<AccountStorage | null> {
   try {
     const path = getStoragePath();
-    // Ensure permissions are correct on load (fixes existing files)
     await ensureSecurePermissions(path);
 
     const content = await fs.readFile(path, "utf-8");
-    const data = JSON.parse(content) as AnyAccountStorage;
+    const data = JSON.parse(content) as AccountStorage;
 
     if (!Array.isArray(data.accounts)) {
       log.warn("Invalid storage format, ignoring");
       return null;
     }
 
-    let storage: AccountStorageV4;
-
-    if (data.version === 1) {
-      log.info("Migrating account storage from v1 to v4");
-      const v2 = migrateV1ToV2(data);
-      const v3 = migrateV2ToV3(v2);
-      storage = migrateV3ToV4(v3);
-      try {
-        await saveAccounts(storage);
-        log.info("Migration to v4 complete");
-      } catch (saveError) {
-        log.warn("Failed to persist migrated storage", {
-          error: String(saveError),
-        });
-      }
-    } else if (data.version === 2) {
-      log.info("Migrating account storage from v2 to v4");
-      const v3 = migrateV2ToV3(data);
-      storage = migrateV3ToV4(v3);
-      try {
-        await saveAccounts(storage);
-        log.info("Migration to v4 complete");
-      } catch (saveError) {
-        log.warn("Failed to persist migrated storage", {
-          error: String(saveError),
-        });
-      }
-    } else if (data.version === 3) {
-      log.info("Migrating account storage from v3 to v4");
-      storage = migrateV3ToV4(data);
-      try {
-        await saveAccounts(storage);
-        log.info("Migration to v4 complete");
-      } catch (saveError) {
-        log.warn("Failed to persist migrated storage", {
-          error: String(saveError),
-        });
-      }
-    } else if (data.version === 4) {
-      storage = data;
-    } else {
+    if (data.version !== 1) {
       log.warn("Unknown storage version, ignoring", {
         version: (data as { version?: unknown }).version,
       });
       return null;
     }
 
-    // Validate accounts have required fields
-    const validAccounts = storage.accounts.filter(
-      (a): a is AccountMetadataV3 => {
+    const validAccounts = data.accounts.filter(
+      (a): a is AccountMetadata => {
         return (
           !!a &&
           typeof a === "object" &&
-          typeof (a as AccountMetadataV3).refreshToken === "string"
+          typeof (a as AccountMetadata).refreshToken === "string"
         );
       },
     );
 
-    // Deduplicate accounts by email (keeps newest entry for each email)
     const deduplicatedAccounts = deduplicateAccountsByEmail(validAccounts);
 
-    // Clamp activeIndex to valid range after deduplication
     let activeIndex =
-      typeof storage.activeIndex === "number" &&
-      Number.isFinite(storage.activeIndex)
-        ? storage.activeIndex
+      typeof data.activeIndex === "number" &&
+      Number.isFinite(data.activeIndex)
+        ? data.activeIndex
         : 0;
     if (deduplicatedAccounts.length > 0) {
       activeIndex = Math.min(activeIndex, deduplicatedAccounts.length - 1);
@@ -678,10 +486,10 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
     }
 
     return {
-      version: 4,
+      version: 1,
       accounts: deduplicatedAccounts,
       activeIndex,
-      activeIndexByFamily: storage.activeIndexByFamily,
+      activeIndexByFamily: data.activeIndexByFamily,
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -693,7 +501,7 @@ export async function loadAccounts(): Promise<AccountStorageV4 | null> {
   }
 }
 
-export async function saveAccounts(storage: AccountStorageV4): Promise<void> {
+export async function saveAccounts(storage: AccountStorage): Promise<void> {
   const path = getStoragePath();
   const configDir = dirname(path);
   await fs.mkdir(configDir, { recursive: true });
@@ -710,7 +518,6 @@ export async function saveAccounts(storage: AccountStorageV4): Promise<void> {
       await fs.writeFile(tempPath, content, { encoding: "utf-8", mode: 0o600 });
       await fs.rename(tempPath, path);
     } catch (error) {
-      // Clean up temp file on failure to prevent accumulation
       try {
         await fs.unlink(tempPath);
       } catch {
@@ -726,7 +533,7 @@ export async function saveAccounts(storage: AccountStorageV4): Promise<void> {
  * Use this for destructive operations like delete where we need to
  * remove accounts that would otherwise be merged back from existing storage.
  */
-export async function saveAccountsReplace(storage: AccountStorageV4): Promise<void> {
+export async function saveAccountsReplace(storage: AccountStorage): Promise<void> {
   const path = getStoragePath();
   const configDir = dirname(path);
   await fs.mkdir(configDir, { recursive: true });
@@ -750,23 +557,16 @@ export async function saveAccountsReplace(storage: AccountStorageV4): Promise<vo
   });
 }
 
-async function loadAccountsUnsafe(): Promise<AccountStorageV4 | null> {
+async function loadAccountsUnsafe(): Promise<AccountStorage | null> {
   try {
     const path = getStoragePath();
-    // Ensure permissions are correct on load (fixes existing files)
     await ensureSecurePermissions(path);
 
     const content = await fs.readFile(path, "utf-8");
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(content) as AccountStorage;
 
-    if (parsed.version === 1) {
-      return migrateV3ToV4(migrateV2ToV3(migrateV1ToV2(parsed)));
-    }
-    if (parsed.version === 2) {
-      return migrateV3ToV4(migrateV2ToV3(parsed));
-    }
-    if (parsed.version === 3) {
-      return migrateV3ToV4(parsed);
+    if (parsed.version !== 1 || !Array.isArray(parsed.accounts)) {
+      return null;
     }
 
     return {

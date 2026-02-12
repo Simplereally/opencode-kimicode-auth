@@ -33,10 +33,17 @@ const MULTIMODAL: ModelModalities = {
 export const OPENCODE_MODEL_DEFINITIONS: OpencodeModelDefinitions = {
   // Kimi Code OAuth models are additive-only under the Moonshot provider.
   // Prefix with "kimicode-" to keep them distinct from Moonshot API-key models.
+  //
+  // Two modes matching the kimi-cli / web GUI: thinking off and thinking on.
+  // kimi-cli default max_tokens is 32000; context reported by /models is 262144.
   "kimicode-kimi-k2.5": {
     name: "Kimi Code (K2.5)",
-    // Kimi for Coding currently reports 262144 context via /models.
-    limit: { context: 262144, output: 16384 },
+    limit: { context: 262144, output: 32000 },
+    modalities: MULTIMODAL,
+  },
+  "kimicode-kimi-k2.5-thinking": {
+    name: "Kimi Code (K2.5) Thinking",
+    limit: { context: 262144, output: 32000 },
     modalities: MULTIMODAL,
   },
 }

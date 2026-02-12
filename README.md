@@ -1,47 +1,87 @@
-# opencode-kimicode-auth
+# OpenCode Kimi Code Auth
 
-OpenCode auth plugin that adds **Kimi Code OAuth** (kmi-cli style device-code flow) under the **Moonshot AI** provider (`moonshotai`).
+OpenCode plugin for **Kimi Code OAuth** under the **Moonshot AI** provider.
 
-It lets you bring your own Kimi subscription via OAuth, manages a multi-account pool (rotation + proactive refresh), and routes Moonshot `/v1/*` requests to Kimi Code:
-
-- `https://api.kimi.com/coding/v1/*`
+Authenticates via device-code OAuth (same flow as kimi-cli), manages multi-account rotation, and routes requests to the Kimi Code API.
 
 ## Models
 
-This plugin adds Kimi Code OAuth models **additively** under `provider.moonshotai.models`.
+| OpenCode model | Mode | Kimi API model |
+|---|---|---|
+| `moonshotai/kimicode-kimi-k2.5` | Thinking off | `kimi-for-coding` |
+| `moonshotai/kimicode-kimi-k2.5-thinking` | Thinking on | `kimi-for-coding` |
 
-- `moonshotai/kimicode-kimi-k2.5` (maps to Kimi Code `kimi-for-coding`)
+Both models use 262k context and 32k output. Existing `moonshotai/*` API-key models are unaffected.
 
-Existing `moonshotai/*` models intended for API-key auth are not modified.
+## Install
 
-## Usage
+Add the plugin to `~/.config/opencode/opencode.json`:
 
-1. Ensure the plugin is installed and listed in your OpenCode config.
-2. Run `opencode auth login`
-3. Select **Moonshot AI**
-4. Select **OAuth (Kimi Code / kimi-cli)**
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "opencode-kimicode-auth@latest"
+  ]
+}
+```
 
-The OAuth menu supports adding multiple accounts and removing accounts from the pool.
+Then authenticate:
 
-## Files Written
+```bash
+opencode auth login
+```
 
-- OpenCode credential store (OpenCode-owned):
-  - `~/.local/share/opencode/auth.json` (`moonshotai` entry of type `oauth`)
-- Account pool (plugin-owned):
-  - `~/.config/opencode/kimicode-accounts.json`
+In the picker, select **Moonshot AI** → **OAuth (Kimi Code / kimi-cli)**.
 
-## Configuration
+A browser window opens for Kimi device authorization. After approval, the plugin stores your tokens locally. You can add multiple accounts for rotation.
 
-Optional config files (JSON):
+Verify:
 
-- User-level: `~/.config/opencode/kimicode.json`
-- Project-level: `<project>/.opencode/kimicode.json`
+```bash
+opencode models moonshotai
+```
 
-Environment variables are also supported (see `src/plugin/config/loader.ts`).
+## Troubleshooting
 
-## Debugging
+- **Only seeing "Enter your API key"** — Ensure `"opencode-kimicode-auth@latest"` is in your plugin array, then re-run `opencode auth login`.
+- **Auth errors after working setup** — Your refresh token may have expired. Re-run `opencode auth login`.
 
-Set `OPENCODE_KIMICODE_DEBUG=1` (or `verbose`) to write request/response logs under:
+## For LLMs
 
-- `~/.config/opencode/kimicode-logs/`
+Copy this prompt into your coding agent to set up the plugin:
 
+```text
+Configure OpenCode on this machine to use Kimi Code OAuth via the published plugin.
+
+Goal:
+- Use Kimi Code OAuth in OpenCode for moonshotai/kimicode-* models.
+
+Rules:
+- Never print credential values.
+- Only modify config fields required for this setup.
+
+Steps:
+1. Validate tools:
+   - Run: opencode --version
+2. Update OpenCode config:
+   - File: ~/.config/opencode/opencode.json
+   - Ensure the plugin array includes: "opencode-kimicode-auth@latest"
+   - Preserve all other existing plugin entries.
+3. Verify OpenCode starts cleanly:
+   - Run: opencode auth list
+   - If plugin install/import errors occur, fix the plugin entry first.
+4. **Do not attempt interactive auth in this session.**
+   - Ask the human to run: opencode auth login
+   - Ask the human to choose provider "Moonshot AI" and method "OAuth (Kimi Code / kimi-cli)".
+   - Wait for the human to confirm they completed authorization.
+5. After human confirmation, verify:
+   - Run: opencode auth list
+   - Run: opencode models moonshotai
+   - Confirm output includes moonshotai/kimicode-kimi-k2.5 and moonshotai/kimicode-kimi-k2.5-thinking.
+6. Return a concise report of changes and verification results.
+```
+
+## License
+
+MIT

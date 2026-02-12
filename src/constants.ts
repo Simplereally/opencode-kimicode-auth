@@ -2,6 +2,8 @@
  * Constants for Kimi Code OAuth flows and API integration.
  */
 
+import { execSync } from "node:child_process"
+import { randomBytes } from "node:crypto"
 import {
   arch,
   hostname,
@@ -73,11 +75,13 @@ export const KIMI_REFRESH_INTERVAL_SECONDS = 60
 export const KIMI_PROVIDER_ID = "kimi"
 
 /**
- * Version fallback for plugin identification.
+ * Emulated kimi-cli version for User-Agent and X-Msh-Version headers.
+ * This should track a recent kimi-cli release to avoid server-side
+ * version gating. Override with KIMI_CODE_CLI_VERSION env var.
  */
-const KIMI_PLUGIN_VERSION_FALLBACK = "0.1.0"
-let kimiPluginVersion = KIMI_PLUGIN_VERSION_FALLBACK
-let versionLocked = false
+const KIMI_CLI_COMPAT_VERSION = "1.12.0"
+let kimiPluginVersion = process.env.KIMI_CODE_CLI_VERSION || KIMI_CLI_COMPAT_VERSION
+let versionLocked = !!process.env.KIMI_CODE_CLI_VERSION
 
 export function getKimiPluginVersion(): string { return kimiPluginVersion }
 
@@ -116,11 +120,50 @@ function getDeviceName(): string {
   }
 }
 
+function getMacOsVersion(): string {
+  try {
+    return execSync("sw_vers -productVersion", { encoding: "utf8" }).trim()
+  } catch {
+    // Fallback: derive from Darwin kernel version (e.g. 23.x → 14.x)
+    try {
+      return release()
+    } catch {
+      return ""
+    }
+  }
+}
+
+function getWindowsRelease(): string {
+  try {
+    // os.release() returns e.g. "10.0.22621" on Windows
+    const rel = release()
+    const major = rel.split(".")[0]
+    // Windows 11 is still NT 10.0 but with build >= 22000
+    if (major === "10") {
+      const build = parseInt(rel.split(".")[2] ?? "0", 10)
+      if (build >= 22000) return "11"
+    }
+    return major ?? rel
+  } catch {
+    return ""
+  }
+}
+
 function getDeviceModel(): string {
   const sys = platform()
   const a = arch()
-  if (sys === "darwin") return `macOS ${a}`.trim()
-  if (sys === "win32") return `Windows ${a}`.trim()
+  if (sys === "darwin") {
+    const ver = getMacOsVersion()
+    if (ver && a) return `macOS ${ver} ${a}`
+    if (ver) return `macOS ${ver}`
+    return `macOS ${a}`.trim()
+  }
+  if (sys === "win32") {
+    const rel = getWindowsRelease()
+    if (rel && a) return `Windows ${rel} ${a}`
+    if (rel) return `Windows ${rel}`
+    return `Windows ${a}`.trim()
+  }
   if (sys) return `${sys} ${release()} ${a}`.trim()
   return "Unknown"
 }
@@ -135,6 +178,41 @@ function getOsVersion(): string {
       return "unknown"
     }
   }
+}
+
+/**
+ * X-Msh-* headers for OAuth requests (device auth, token exchange, refresh).
+ * Matches kimi-cli's _common_headers() which sends these on every OAuth call.
+ * Uses a session-stable device ID generated at module load.
+ */
+export function getKimiOAuthHeaders(): Record<string, string> {
+  return {
+    "X-Msh-Platform": "kimi_cli",
+    "X-Msh-Version": getKimiPluginVersion(),
+    "X-Msh-Device-Name": asciiHeaderValue(getDeviceName()),
+    "X-Msh-Device-Model": asciiHeaderValue(getDeviceModel()),
+    "X-Msh-Os-Version": asciiHeaderValue(getOsVersion()),
+    "X-Msh-Device-Id": getOrCreateOAuthDeviceId(),
+  }
+}
+
+/**
+ * Lazily-generated device ID for OAuth requests.
+ * In kimi-cli this is persisted to ~/.kimi/device_id; here we generate once
+ * per process and also allow the fingerprint module to override it later.
+ */
+let oauthDeviceId: string | null = null
+
+function getOrCreateOAuthDeviceId(): string {
+  if (!oauthDeviceId) {
+    // Generate a 32-char lowercase hex string matching kimi-cli's uuid4().hex format
+    oauthDeviceId = randomBytes(16).toString("hex")
+  }
+  return oauthDeviceId
+}
+
+export function setOAuthDeviceId(id: string): void {
+  oauthDeviceId = id
 }
 
 function asciiHeaderValue(value: string, fallback = "unknown"): string {

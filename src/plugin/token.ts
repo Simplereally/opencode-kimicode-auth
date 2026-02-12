@@ -1,4 +1,4 @@
-import { KIMI_CLIENT_ID, KIMI_TOKEN_ENDPOINT } from "../constants"
+import { KIMI_CLIENT_ID, KIMI_TOKEN_ENDPOINT, getKimiOAuthHeaders } from "../constants"
 import { calculateTokenExpiry } from "./auth"
 import { clearCachedAuth, storeCachedAuth } from "./cache"
 import { createLogger } from "./logger"
@@ -79,6 +79,7 @@ export async function refreshAccessToken(
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        ...getKimiOAuthHeaders(),
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",

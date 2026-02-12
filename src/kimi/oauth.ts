@@ -12,6 +12,7 @@ import {
   KIMI_DEVICE_AUTH_ENDPOINT,
   KIMI_TOKEN_ENDPOINT,
   KIMI_DEVICE_CODE_GRANT_TYPE,
+  getKimiOAuthHeaders,
 } from "../constants"
 
 // =============================================================================
@@ -48,6 +49,7 @@ export async function requestDeviceAuthorization(): Promise<DeviceAuthorizationR
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
+      ...getKimiOAuthHeaders(),
     },
     body: new URLSearchParams({
       client_id: KIMI_CLIENT_ID,
@@ -83,6 +85,7 @@ async function pollTokenEndpointOnce(deviceCode: string): Promise<PollResult> {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
+      ...getKimiOAuthHeaders(),
     },
     body: new URLSearchParams({
       grant_type: KIMI_DEVICE_CODE_GRANT_TYPE,

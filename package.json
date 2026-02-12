@@ -39,9 +39,6 @@
         "test:coverage": "vitest run --coverage",
         "prepublishOnly": "npm run build"
     },
-    "peerDependencies": {
-        "typescript": "^5"
-    },
     "devDependencies": {
         "@types/node": "^24.10.1",
         "@types/proper-lockfile": "^4.1.4",
