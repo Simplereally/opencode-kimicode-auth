@@ -3,7 +3,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { updateOpencodeConfig } from "./config/updater";
 
 // TODO: Add UI module (./ui/auth-menu) — stubbed for now
-export type AccountStatus = "active" | "rate-limited" | "cooling-down" | "disabled" | "verification-required";
+export type AccountStatus = "active" | "rate-limited" | "cooling-down" | "disabled" | "expired";
 
 interface AccountInfo {
   email?: string;
@@ -13,6 +13,17 @@ interface AccountInfo {
   status?: AccountStatus;
   isCurrentAccount?: boolean;
   enabled?: boolean;
+}
+
+function getStatusBadge(status: AccountStatus | undefined): string {
+  switch (status) {
+    case "active": return ` \x1b[32m[active]\x1b[0m`;
+    case "rate-limited": return ` \x1b[33m[rate-limited]\x1b[0m`;
+    case "cooling-down": return ` \x1b[33m[cooling-down]\x1b[0m`;
+    case "disabled": return ` \x1b[31m[disabled]\x1b[0m`;
+    case "expired": return ` \x1b[31m[expired - re-auth required]\x1b[0m`;
+    default: return "";
+  }
 }
 
 function isTTY(): boolean {
@@ -62,7 +73,9 @@ async function promptLoginModeFallback(existingAccounts: ExistingAccountInfo[]):
     console.log(`\n${existingAccounts.length} account(s) saved:`);
     for (const acc of existingAccounts) {
       const label = acc.email || `Account ${acc.index + 1}`;
-      console.log(`  ${acc.index + 1}. ${label}`);
+      const badge = getStatusBadge(acc.status);
+      const currentTag = acc.isCurrentAccount ? " \x1b[36m[current]\x1b[0m" : "";
+      console.log(`  ${acc.index + 1}. ${label}${currentTag}${badge}`);
     }
     console.log("");
 

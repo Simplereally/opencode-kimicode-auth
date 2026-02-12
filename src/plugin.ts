@@ -341,15 +341,17 @@ function toExistingAccountsForMenu(stored: { accounts: AccountMetadataV3[]; acti
   index: number;
   addedAt?: number;
   lastUsed?: number;
-  status?: "active" | "rate-limited" | "cooling-down" | "disabled" | "verification-required";
+  status?: "active" | "rate-limited" | "cooling-down" | "disabled" | "expired";
   isCurrentAccount?: boolean;
   enabled?: boolean;
 }> {
   if (!stored?.accounts?.length) return [];
   const now = Date.now();
   return stored.accounts.map((acc, idx) => {
-    let status: "active" | "rate-limited" | "cooling-down" | "disabled" | "verification-required" = "active";
-    if (acc.enabled === false) {
+    let status: "active" | "rate-limited" | "cooling-down" | "disabled" | "expired" = "active";
+    if (acc.enabled === false && acc.cooldownReason === "auth-failure") {
+      status = "expired";
+    } else if (acc.enabled === false) {
       status = "disabled";
     } else if (acc.coolingDownUntil && acc.coolingDownUntil > now) {
       status = "cooling-down";
