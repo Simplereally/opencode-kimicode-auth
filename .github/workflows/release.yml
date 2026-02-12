@@ -29,8 +29,6 @@ jobs:
 
       - name: Publish to npm with provenance
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ""
 
       - name: Create git tag
         run: |
