@@ -2,6 +2,16 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump level"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
@@ -18,14 +28,27 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
+      - name: Bump version
+        id: version
+        run: |
+          BUMP="${{ inputs.bump || 'patch' }}"
+          OLD=$(node -p 'require("./package.json").version')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$OLD"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW="${MAJOR}.${MINOR}.${PATCH}"
+          npm version "$NEW" --no-git-tag-version
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          echo "Bumped $OLD → $NEW ($BUMP)"
+
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-
-      - name: Read version
-        id: version
-        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
       # Clear the token placeholder so npm falls through to OIDC auth.
       - name: Publish to npm
@@ -33,11 +56,14 @@ jobs:
           npm config delete //registry.npmjs.org/:_authToken || true
           npm publish --access public
 
-      - name: Create git tag
+      - name: Commit version bump and tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "release: v${{ steps.version.outputs.version }}"
           git tag "v${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
           git push origin "v${{ steps.version.outputs.version }}"
 
       - name: Create GitHub Release
