@@ -64,22 +64,34 @@ Rules:
 Steps:
 1. Validate tools:
    - Run: opencode --version
-2. Update OpenCode config:
-   - File: ~/.config/opencode/opencode.json
+
+2. Locate OpenCode config:
+   - Run: CONFIG=$(find "$HOME/.config" -name "opencode.json*" -type f 2>/dev/null | head -1)
+   - Verify: echo "Found config: $CONFIG"
+
+3. Update OpenCode config:
+   - Read current config: cat "$CONFIG"
+   - If "plugin" array doesn't exist, add it after "$schema":
+     {"$schema": "...", "plugin": []}
    - Ensure the plugin array includes: "@itssimplereally/opencode-kimicode-auth@latest"
    - Preserve all other existing plugin entries.
-3. Verify OpenCode starts cleanly:
+   - Write updated config back to "$CONFIG"
+
+4. Verify OpenCode starts cleanly:
    - Run: opencode auth list
    - If plugin install/import errors occur, fix the plugin entry first.
-4. **Do not attempt interactive auth in this session.**
+
+5. **Do not attempt interactive auth in this session.**
    - Ask the human to run: opencode auth login
    - Ask the human to choose provider "Moonshot AI" and method "OAuth (Kimi Code / kimi-cli)".
    - Wait for the human to confirm they completed authorization.
-5. After human confirmation, verify:
+
+6. After human confirmation, verify:
    - Run: opencode auth list
    - Run: opencode models moonshotai
    - Confirm output includes moonshotai/kimicode-kimi-k2.5 and moonshotai/kimicode-kimi-k2.5-thinking.
-6. Return a concise report of changes and verification results.
+
+7. Return a concise report of changes and verification results.
 ```
 
 ## License
