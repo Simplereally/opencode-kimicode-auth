@@ -836,6 +836,16 @@ export const createKimicodePlugin = (providerId: string) => async (
                 lastAccountIndex = account.index;
               }
 
+              // Show toast when switching accounts (debounced).
+              const accountCount = accountManager.getAccountCount();
+              if (accountCount > 1 && accountManager.shouldShowAccountToast(account.index)) {
+                const accountLabel = account.email || `Account ${account.index + 1}`;
+                const enabledAccounts = accountManager.getEnabledAccounts();
+                const enabledPosition = enabledAccounts.findIndex(a => a.index === account.index) + 1;
+                await showToast(`Using ${accountLabel} (${enabledPosition}/${accountCount})`, "info");
+                accountManager.markToastShown(account.index);
+              }
+
 	              // Resolve/refresh the account's access token.
 	              let accountAuth = resolveCachedAuth(accountManager.toAuthDetails(account));
 	              if (accessTokenExpired(accountAuth)) {
