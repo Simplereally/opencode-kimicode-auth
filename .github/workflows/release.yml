@@ -22,17 +22,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for git tag lookup
 
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Bump version
+      - name: Determine version from latest tag
         id: version
         run: |
           BUMP="${{ inputs.bump || 'patch' }}"
-          OLD=$(node -p 'require("./package.json").version')
+
+          # Get latest version tag, fallback to package.json
+          LATEST_TAG=$(git tag --list 'v*' --sort=-version:refname | head -n1 || true)
+          if [ -n "$LATEST_TAG" ]; then
+            OLD="${LATEST_TAG#v}"
+          else
+            OLD=$(node -p 'require("./package.json").version')
+          fi
+
           IFS='.' read -r MAJOR MINOR PATCH <<< "$OLD"
           case "$BUMP" in
             major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
@@ -40,6 +50,8 @@ jobs:
             patch) PATCH=$((PATCH + 1)) ;;
           esac
           NEW="${MAJOR}.${MINOR}.${PATCH}"
+
+          # Update package.json locally for npm publish (not committed to main)
           npm version "$NEW" --no-git-tag-version
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
           echo "old=$OLD" >> "$GITHUB_OUTPUT"
@@ -56,14 +68,12 @@ jobs:
           npm config delete //registry.npmjs.org/:_authToken || true
           npm publish --access public
 
-      - name: Commit version bump and tag
+      # Tags aren't branches — branch protection rules don't apply.
+      - name: Create git tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
-          git commit -m "release: v${{ steps.version.outputs.version }}"
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin HEAD:main
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
           git push origin "v${{ steps.version.outputs.version }}"
 
       - name: Create GitHub Release
