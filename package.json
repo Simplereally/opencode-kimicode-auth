@@ -1,5 +1,5 @@
 {
-    "name": "opencode-kimicode-auth",
+    "name": "@itssimplereally/opencode-kimicode-auth",
     "version": "0.1.0",
     "description": "Kimi Code OAuth auth plugin for OpenCode - access Kimi models using Moonshot AI credentials",
     "main": "./dist/index.js",

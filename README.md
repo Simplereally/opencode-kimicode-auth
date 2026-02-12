@@ -21,7 +21,7 @@ Add the plugin to `~/.config/opencode/opencode.json`:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "opencode-kimicode-auth@latest"
+    "@itssimplereally/opencode-kimicode-auth@latest"
   ]
 }
 ```
@@ -44,7 +44,7 @@ opencode models moonshotai
 
 ## Troubleshooting
 
-- **Only seeing "Enter your API key"** — Ensure `"opencode-kimicode-auth@latest"` is in your plugin array, then re-run `opencode auth login`.
+- **Only seeing "Enter your API key"** — Ensure `"@itssimplereally/opencode-kimicode-auth@latest"` is in your plugin array, then re-run `opencode auth login`.
 - **Auth errors after working setup** — Your refresh token may have expired. Re-run `opencode auth login`.
 
 ## For LLMs
@@ -66,7 +66,7 @@ Steps:
    - Run: opencode --version
 2. Update OpenCode config:
    - File: ~/.config/opencode/opencode.json
-   - Ensure the plugin array includes: "opencode-kimicode-auth@latest"
+   - Ensure the plugin array includes: "@itssimplereally/opencode-kimicode-auth@latest"
    - Preserve all other existing plugin entries.
 3. Verify OpenCode starts cleanly:
    - Run: opencode auth list
