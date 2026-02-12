@@ -13,6 +13,23 @@ Authenticates via device-code OAuth (same flow as kimi-cli), manages multi-accou
 
 Both models use 262k context and 32k output. Existing `moonshotai/*` API-key models are unaffected.
 
+--- 
+
+<details open>
+<summary><b>⚠️ Terms of Service Warning — Read Before Installing</b></summary>
+
+> [!CAUTION]
+> Using this plugin may violate Moonshot AI's Terms of Service. It may result in your account being **banned** or **shadow-banned** (restricted access without explicit notification).
+>
+> **By using this plugin, you acknowledge:**
+> - This is an unofficial tool not endorsed by Moonshot AI
+> - Your account may be suspended or permanently banned
+> - You assume all risks associated with using this plugin
+>
+> **Recommendation:** Try not to go overboard with the number of accounts you add. Stagger usage reasonably; don't run 24/7.
+
+</details>
+
 ## Install
 
 Add the plugin to `~/.config/opencode/opencode.json`:
